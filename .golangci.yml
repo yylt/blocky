@@ -21,7 +21,7 @@ linters:
     - godox
     - gofmt
     - goimports
-    - gomnd
+    - mnd
     - gomodguard
     - gosec
     - gosimple
@@ -53,16 +53,11 @@ linters:
     - usestdlibvars
     - wastedassign
     - whitespace
-    - wsl
     - ginkgolinter
     - noctx
     - containedctx
     - contextcheck
   disable:
-    - scopelint
-    - structcheck
-    - deadcode
-    - varcheck
     - forbidigo
     - gosmopolitan
   disable-all: false
@@ -72,7 +67,7 @@ linters:
   fast: false
 
 linters-settings:
-  gomnd:
+  mnd:
     ignored-numbers:
       - "0666"
   ginkgolinter:

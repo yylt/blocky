@@ -11,12 +11,12 @@ configuration properties as [JSON](config.yml).
 
 ## Basic configuration
 
-| Parameter           | Type                | Mandatory | Default value | Description                                                                                                |
-| ------------------- | ------------------- | --------- | ------------- | ---------------------------------------------------------------------------------------------------------- |
-| certFile            | path                | no        |               | Path to cert and key file for SSL encryption (DoH and DoT); if empty, self-signed certificate is generated |
-| keyFile             | path                | no        |               | Path to cert and key file for SSL encryption (DoH and DoT); if empty, self-signed certificate is generated |
-| minTlsServeVersion  | string              | no        | 1.2           | Minimum TLS version that the DoT and DoH server use to serve those encrypted DNS requests                  |
-| connectIPVersion    | enum (dual, v4, v6) | no        | dual          | IP version to use for outgoing connections (dual, v4, v6)                                                  |
+| Parameter          | Type                | Mandatory | Default value | Description                                                                                                |
+| ------------------ | ------------------- | --------- | ------------- | ---------------------------------------------------------------------------------------------------------- |
+| certFile           | path                | no        |               | Path to cert and key file for SSL encryption (DoH and DoT); if empty, self-signed certificate is generated |
+| keyFile            | path                | no        |               | Path to cert and key file for SSL encryption (DoH and DoT); if empty, self-signed certificate is generated |
+| minTlsServeVersion | string              | no        | 1.2           | Minimum TLS version that the DoT and DoH server use to serve those encrypted DNS requests                  |
+| connectIPVersion   | enum (dual, v4, v6) | no        | dual          | IP version to use for outgoing connections (dual, v4, v6)                                                  |
 
 !!! example
 
@@ -29,12 +29,12 @@ configuration properties as [JSON](config.yml).
 
 All logging port are optional.
 
-| Parameter   | Type                   | Default value | Description                                                                                                                                                                                                                                       |
-| ----------- | ---------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ports.dns   | [IP]:port[,[IP]:port]* | 53            | Port(s) and optional bind ip address(es) to serve DNS endpoint (TCP and UDP). If you wish to specify a specific IP, you can do so such as `192.168.0.1:53`. Example: `53`, `:53`, `127.0.0.1:53,[::1]:53`                                         |
-| ports.tls   | [IP]:port[,[IP]:port]* |               | Port(s) and optional bind ip address(es) to serve DoT DNS endpoint (DNS-over-TLS). If you wish to specify a specific IP, you can do so such as `192.168.0.1:853`. Example: `83`, `:853`, `127.0.0.1:853,[::1]:853`                                |
-| ports.http  | [IP]:port[,[IP]:port]* |               | Port(s) and optional bind ip address(es) to serve HTTP used for prometheus metrics, pprof, REST API, DoH... If you wish to specify a specific IP, you can do so such as `192.168.0.1:4000`. Example: `4000`, `:4000`, `127.0.0.1:4000,[::1]:4000` |
-| ports.https | [IP]:port[,[IP]:port]* |               | Port(s) and optional bind ip address(es) to serve HTTPS used for prometheus metrics, pprof, REST API, DoH... If you wish to specify a specific IP, you can do so such as `192.168.0.1:443`. Example: `443`, `:443`, `127.0.0.1:443,[::1]:443`     |
+| Parameter   | Type                    | Default value | Description                                                                                                                                                                                                                                       |
+| ----------- | ----------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ports.dns   | [IP]:port[,[IP]:port]\* | 53            | Port(s) and optional bind ip address(es) to serve DNS endpoint (TCP and UDP). If you wish to specify a specific IP, you can do so such as `192.168.0.1:53`. Example: `53`, `:53`, `127.0.0.1:53,[::1]:53`                                         |
+| ports.tls   | [IP]:port[,[IP]:port]\* |               | Port(s) and optional bind ip address(es) to serve DoT DNS endpoint (DNS-over-TLS). If you wish to specify a specific IP, you can do so such as `192.168.0.1:853`. Example: `83`, `:853`, `127.0.0.1:853,[::1]:853`                                |
+| ports.http  | [IP]:port[,[IP]:port]\* |               | Port(s) and optional bind ip address(es) to serve HTTP used for prometheus metrics, pprof, REST API, DoH... If you wish to specify a specific IP, you can do so such as `192.168.0.1:4000`. Example: `4000`, `:4000`, `127.0.0.1:4000,[::1]:4000` |
+| ports.https | [IP]:port[,[IP]:port]\* |               | Port(s) and optional bind ip address(es) to serve HTTPS used for prometheus metrics, pprof, REST API, DoH... If you wish to specify a specific IP, you can do so such as `192.168.0.1:443`. Example: `443`, `:443`, `127.0.0.1:443,[::1]:443`     |
 
 !!! example
 
@@ -49,12 +49,12 @@ All logging port are optional.
 
 All logging options are optional.
 
-| Parameter     | Type                                   | Default value | Description                                                                                                                                      |
-| ------------- | -------------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| log.level     | enum (trace, debug, info, warn, error) | info          | Log level                                                                                                                                        |
-| log.format    | enum (text, json)                      | text          | Log format (text or json).                                                                                                                       |
-| log.timestamp | bool                                   | true          | Log timestamps (true or false).                                                                                                                 |
-| log.privacy   | bool                                   | false         | Obfuscate log output (replace all alphanumeric characters with *) for user sensitive data like request domains or responses to increase privacy. |
+| Parameter     | Type                                   | Default value | Description                                                                                                                                       |
+| ------------- | -------------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| log.level     | enum (trace, debug, info, warn, error) | info          | Log level                                                                                                                                         |
+| log.format    | enum (text, json)                      | text          | Log format (text or json).                                                                                                                        |
+| log.timestamp | bool                                   | true          | Log timestamps (true or false).                                                                                                                   |
+| log.privacy   | bool                                   | false         | Obfuscate log output (replace all alphanumeric characters with \*) for user sensitive data like request domains or responses to increase privacy. |
 
 !!! example
 
@@ -89,7 +89,6 @@ This applies to all of them. The default strategy is blocking.
 
 For `init.strategy`, the "init" is testing the given resolvers for each group. The potentially fatal error, depending on the strategy, is if a group has no functional resolvers.
 
-
 ### Upstream Groups
 
 To resolve a DNS query, blocky needs external public or private DNS resolvers. Blocky supports DNS resolvers with
@@ -101,9 +100,9 @@ following network protocols (net part of the resolver URL):
 
 !!! hint
 
-    You can (and should!) configure multiple DNS resolvers.  
+    You can (and should!) configure multiple DNS resolvers.
     Per default blocky uses the `parallel_best` upstream strategy where blocky picks 2 random resolvers from the list for each query and
-    returns the answer from the fastest one.  
+    returns the answer from the fastest one.
 
 Each resolver must be defined as a string in following format: `[net:]host:[port][/path][#commonName]`.
 
@@ -198,7 +197,6 @@ Currently available strategies:
           - 9.8.7.6
     ```
 
-
 ## Bootstrap DNS configuration
 
 These DNS servers are used to resolve upstream DoH and DoT servers that are specified as host names, and list domains.
@@ -256,7 +254,7 @@ Please be aware that by enabling it your hostname resolution will break unless e
 ## Custom DNS
 
 You can define your own domain name to IP mappings. For example, you can use a user-friendly name for a network printer
-or define a domain name for your local device on order to use the HTTPS certificate. Multiple IP addresses for one
+or define a domain name for your local device in order to use the HTTPS certificate. Multiple IP addresses for one
 domain must be separated by a comma.
 
 | Parameter           | Type                                                   | Mandatory | Default value |
@@ -291,10 +289,11 @@ This configuration will also resolve any subdomain of the defined domain, recurs
 CNAME records are supported by utilizing the `zone` parameter. The zone file is a multiline string containing a [DNS Zone File](https://en.wikipedia.org/wiki/Zone_file#Example_file).
 For records defined using the `zone` parameter, the `customTTL` parameter is unused. Instead, the TTL is defined in the zone directly.
 The following directives are supported in the zone file:
-* `$ORIGIN` - sets the origin for relative domain names
-* `$TTL` - sets the default TTL for records in the zone
-* `$INCLUDE` - includes another zone file relative to the blocky executable
-* `$GENERATE` - generates a range of records
+
+- `$ORIGIN` - sets the origin for relative domain names
+- `$TTL` - sets the default TTL for records in the zone
+- `$INCLUDE` - includes another zone file relative to the blocky executable
+- `$GENERATE` - generates a range of records
 
 With the optional parameter `rewrite` you can replace domain part of the query with the defined part **before** the
 resolver lookup is performed.
@@ -412,7 +411,7 @@ Each list in a group is a "source" and can be downloaded, read from a file, or i
 
 The supported list formats are:
 
-1. the well-known [Hosts format](https://en.wikipedia.org/wiki/Hosts_(file))
+1. the well-known [Hosts format](<https://en.wikipedia.org/wiki/Hosts_(file)>)
 2. one domain per line (plain domain list)
 3. one wildcard per line
 4. one regex per line
@@ -648,46 +647,64 @@ in Excel or OpenOffice Calc) or MySQL/MariaDB database.
 
 You can select one of following query log types:
 
-- `mysql` - log each query in the external MySQL/MariaDB database
-- `postgresql` - log each query in the external PostgreSQL database
-- `csv` - log into CSV file (one per day)
-- `csv-client` - log into CSV file (one per day and per client)
-- `console` - log into console output
-- `none` - do not log any queries
+- `mysql`: log each query in the external MySQL/MariaDB database
+- `postgresql`: log each query in the external PostgreSQL database
+- `timescale`: log each query in the external Timescale database
+- `csv`: log into CSV file (one per day)
+- `csv-client`: log into CSV file (one per day and per client)
+- `console`: log into console output
+- `none`: do not log any queries
 
 ### Query log fields
 
 You can choose which information from processed DNS request and response should be logged in the target system. You can define one or more of following fields:
 
-- `clientIP` - origin IP address from the request
-- `clientName` - resolved client name(s) from the origins request
-- `responseReason` - reason for the response (e.g. from which upstream resolver), response type and code
-- `responseAnswer` - returned DNS answer
-- `question` - DNS question from the request
-- `duration` - request processing time in milliseconds
+- `clientIP`: origin IP address from the request
+- `clientName`: resolved client name(s) from the origins request
+- `responseReason`: reason for the response (e.g. from which upstream resolver), response type and code
+- `responseAnswer`: returned DNS answer
+- `question`: DNS question from the request
+- `duration`: request processing time in milliseconds
 
 !!! hint
     If not defined, blocky will log all available information
 
 Configuration parameters:
 
-| Parameter                 | Type                                                                                 | Mandatory | Default value | Description                                                                        |
-| ------------------------- | ------------------------------------------------------------------------------------ | --------- | ------------- | ---------------------------------------------------------------------------------- |
-| queryLog.type             | enum (mysql, postgresql, csv, csv-client, console, none (see above))                 | no        |               | Type of logging target. Console if empty                                           |
-| queryLog.target           | string                                                                               | no        |               | directory for writing the logs (for csv) or database url (for mysql or postgresql) |
-| queryLog.logRetentionDays | int                                                                                  | no        | 0             | if > 0, deletes log files/database entries which are older than ... days           |
-| queryLog.creationAttempts | int                                                                                  | no        | 3             | Max attempts to create specific query log writer                                   |
-| queryLog.creationCooldown | duration format                                                                      | no        | 2s            | Time between the creation attempts                                                 |
-| queryLog.fields           | list enum (clientIP, clientName, responseReason, responseAnswer, question, duration) | no        | all           | which information should be logged                                                 |
-| queryLog.flushInterval    | duration format                                                                      | no        | 30s           | Interval to write data in bulk to the external database                            |
+| Parameter                 | Type                                                                                 | Mandatory | Default value | Description                                                                                   |
+| ------------------------- | ------------------------------------------------------------------------------------ | --------- | ------------- | --------------------------------------------------------------------------------------------- |
+| queryLog.type             | enum (mysql, postgresql, timescale, csv, csv-client, console, none (see above))      | no        |               | Type of logging target. Console if empty                                                      |
+| queryLog.target           | string                                                                               | no        |               | directory for writing the logs (for csv) or database url (for mysql, postgresql or timescale) |
+| queryLog.logRetentionDays | int                                                                                  | no        | 0             | if > 0, deletes log files/database entries which are older than ... days                      |
+| queryLog.creationAttempts | int                                                                                  | no        | 3             | Max attempts to create specific query log writer                                              |
+| queryLog.creationCooldown | duration format                                                                      | no        | 2s            | Time between the creation attempts                                                            |
+| queryLog.fields           | list enum (clientIP, clientName, responseReason, responseAnswer, question, duration) | no        | all           | which information should be logged                                                            |
+| queryLog.flushInterval    | duration format                                                                      | no        | 30s           | Interval to write data in bulk to the external database                                       |
 
 !!! hint
 
     Please ensure, that the log directory is writable or database exists. If you use docker, please ensure, that the directory is properly
     mounted (e.g. volume)
 
-example for CSV format with limited logging information
+### Database URLs
+
+To connect to a database, you must provide a URL like value for `target`. The exact format and supported parameters depends on the DB type.
+Parsing is handled not by Blocky, but third-party libraries, therefore the full documentation is external.
+
+| Database   | Full docs                                                                                       | Format                                                                                   | Example                                                              |
+| ---------- | ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| MySQL      | [Go MySQL driver Data Source Name](https://github.com/go-sql-driver/mysql#dsn-data-source-name) | `[username[:password]@][protocol[(host[:port])]]/dbname[?param1=value1[&paramN=valueN]]` | `username:password@tcp(localhost:3306)/blocky_query_log?timeout=15s` |
+| PostgreSQL | [pgx.ParseConfig](https://pkg.go.dev/github.com/jackc/pgx/v5/pgconn#ParseConfig)                | `postgres://[username[:password]@][host[:port]]/dbname[?param1=value1[&paramN=valueN]]`  | `postgres://username@localhost:5432/blocky_query_log`                |
+| Timescale  | See PostgreSQL above                                                                            |                                                                                          |                                                                      |
+
+!!! note
+
+    For increased security, it is recommended to configure the password for a PostgreSQL/Timescale connection via the `PGPASSFILE` environment variable.
+
+### Examples
+
 !!! example
+**CSV format with limited logging information**
 
     ```yaml
     queryLog:
@@ -700,13 +717,13 @@ example for CSV format with limited logging information
       flushInterval: 30s
     ```
 
-example for Database
 !!! example
+    **MySQL Database**
 
     ```yaml
     queryLog:
       type: mysql
-      target: db_user:db_password@tcp(db_host_or_ip:3306)/db_user?charset=utf8mb4&parseTime=True&loc=Local
+      target: 'username:password@tcp(localhost:3306)/blocky_query_log?charset=utf8mb4&parseTime=True&loc=Local&timeout=15s'
       logRetentionDays: 7
     ```
 
@@ -734,7 +751,6 @@ Configuration parameters:
       loading:
         strategy: fast
     ```
-
 
 ## Deliver EDE codes as EDNS0 option
 
@@ -774,20 +790,30 @@ EDNS Client Subnet (ECS) configuration parameters:
 
 ## Special Use Domain Names
 
-SUDN (Special Use Domain Names) are always enabled as they are required by various RFCs.  
+SUDN (Special Use Domain Names) are always enabled by default as they are required by various RFCs.  
 Some RFCs have optional recommendations, which are configurable as described below.
+However, you can completely deactivate the blocking of SUDN by setting enable to false.
+Warning! You should only disable this if your upstream DNS server is local, as it shouldn't be disabled for remote upstreams.
 
 Configuration parameters:
 
 | Parameter                           | Type | Mandatory | Default value | Description                                                                                   |
 | ----------------------------------- | ---- | --------- | ------------- | --------------------------------------------------------------------------------------------- |
 | specialUseDomains.rfc6762-appendixG | bool | no        | true          | Block TLDs listed in [RFC 6762 Appendix G](https://www.rfc-editor.org/rfc/rfc6762#appendix-G) |
+| enable                              | bool | no        | true          | completely disable or enable SUDN blocking                                                    |
 
 !!! example
 
     ```yaml
     specialUseDomains:
       rfc6762-appendixG: true
+    ```
+
+!!! example
+
+    ```yaml
+    specialUseDomains:
+      enable: false
     ```
 
 ## SSL certificate configuration (DoH / TLS listener)
@@ -858,11 +884,14 @@ A value of zero or less will disable this feature.
 
 Configures how HTTP(S) sources are downloaded:
 
-| Parameter | Type     | Mandatory | Default value | Description                                    |
-| --------- | -------- | --------- | ------------- | ---------------------------------------------- |
-| timeout   | duration | no        | 5s            | Download attempt timeout                       |
-| attempts  | int      | no        | 3             | How many download attempts should be performed |
-| cooldown  | duration | no        | 500ms         | Time between the download attempts             |
+| Parameter    | Type     | Mandatory | Default value | Description                                    |
+| ------------ | -------- | --------- | ------------- | ---------------------------------------------- |
+| timeout      | duration | no        | 5s            | Download attempt timeout                       |
+| writeTimeout | duration | no        | 20s           | File write attempt timeout                     |
+| readTimeout  | duration | no        | 20s           | Download request read timeout                  |
+| readHeaderTimeout | duration | no        | 20s           | Download request header read timeout           |
+| attempts     | int      | no        | 3             | How many download attempts should be performed |
+| cooldown     | duration | no        | 500ms         | Time between the download attempts             |
 
 !!! example
 
@@ -914,5 +943,5 @@ Default value is 4.
 !!! note
 
     As with other settings under `loading`, the limit applies to the blocking and hosts file resolvers separately.
-    The total number of concurrent sources concurrently processed can reach the sum of both values.  
+    The total number of concurrent sources concurrently processed can reach the sum of both values.
     For example if blocking has a limit set to 8 and hosts file's is 4, there could be up to 12 concurrent jobs.

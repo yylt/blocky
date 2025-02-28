@@ -13,12 +13,13 @@ Blocky supports single or multiple YAML files as configuration. Create new `conf
 Simple configuration file, which enables only basic features:
 
 ```yaml
-upstream:
-  default:
-    - 46.182.19.48
-    - 80.241.218.68
-    - tcp-tls:fdns1.dismail.de:853
-    - https://dns.digitale-gesellschaft.ch/dns-query
+upstreams:
+  groups:
+    default:
+      - 46.182.19.48
+      - 80.241.218.68
+      - tcp-tls:fdns1.dismail.de:853
+      - https://dns.digitale-gesellschaft.ch/dns-query
 blocking:
   denylists:
     ads:
@@ -83,7 +84,7 @@ services:
       # Optional to synchronize the log timestamp with host
       - /etc/localtime:/etc/localtime:ro
       # config file
-      - ./config.yml:/app/config.yml
+      - ./config.yml:/app/config.yml:ro
 ```
 
 and start docker container with
@@ -115,7 +116,7 @@ services:
       - TZ=Europe/Berlin
     volumes:
       # config file
-      - ./config.yml:/app/config.yml
+      - ./config.yml:/app/config.yml:ro
       # write query logs in this volume
       - queryLogs:/logs
       # put your custom allow/denylists in these directories

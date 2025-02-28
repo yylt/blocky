@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 
 	"github.com/0xERR0R/blocky/log"
 	"github.com/0xERR0R/blocky/model"
@@ -25,22 +27,30 @@ const (
 	HTTPS = dns.Type(dns.TypeHTTPS)
 	MX    = dns.Type(dns.TypeMX)
 	PTR   = dns.Type(dns.TypePTR)
+	SRV   = dns.Type(dns.TypeSRV)
 	TXT   = dns.Type(dns.TypeTXT)
 	DS    = dns.Type(dns.TypeDS)
 )
 
-// GetIntPort returns an port for the current testing
+// GetIntPort returns a port for the current testing
 // process by adding the current ginkgo parallel process to
-// the base port and returning it as int
+// the base port and returning it as int.
 func GetIntPort(port int) int {
 	return port + ginkgo.GinkgoParallelProcess()
 }
 
-// GetStringPort returns an port for the current testing
+// GetStringPort returns a port for the current testing
 // process by adding the current ginkgo parallel process to
-// the base port and returning it as string
+// the base port and returning it as string.
 func GetStringPort(port int) string {
 	return fmt.Sprintf("%d", GetIntPort(port))
+}
+
+// GetHostPort returns a host:port string for the current testing
+// process by adding the current ginkgo parallel process to
+// the base port and returning it as string.
+func GetHostPort(host string, port int) string {
+	return net.JoinHostPort(host, GetStringPort(port))
 }
 
 // TempFile creates temp file with passed data
@@ -216,6 +226,10 @@ func (matcher *dnsRecordMatcher) matchSingle(rr dns.RR) (success bool, err error
 		return v.Target == matcher.answer, nil
 	case *dns.PTR:
 		return v.Ptr == matcher.answer, nil
+	case *dns.SRV:
+		return fmt.Sprintf("%d %d %d %s", v.Priority, v.Weight, v.Port, v.Target) == matcher.answer, nil
+	case *dns.TXT:
+		return strings.Join(v.Txt, " ") == matcher.answer, nil
 	case *dns.MX:
 		return v.Mx == matcher.answer, nil
 	}

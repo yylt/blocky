@@ -1,19 +1,10 @@
 package server
 
 import (
-	"bytes"
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/tls"
-	"crypto/x509"
-	"encoding/pem"
 	"errors"
 	"fmt"
-	"math"
-	"math/big"
-	mrand "math/rand"
 	"net"
 	"net/http"
 	"runtime"
@@ -27,6 +18,7 @@ import (
 	"github.com/0xERR0R/blocky/model"
 	"github.com/0xERR0R/blocky/redis"
 	"github.com/0xERR0R/blocky/resolver"
+
 	"github.com/0xERR0R/blocky/util"
 	"github.com/google/uuid"
 	"github.com/hashicorp/go-multierror"
@@ -44,14 +36,11 @@ const (
 
 // Server controls the endpoints for DNS and HTTP
 type Server struct {
-	dnsServers     []*dns.Server
-	httpListeners  []net.Listener
-	httpsListeners []net.Listener
-	queryResolver  resolver.ChainedResolver
-	cfg            *config.Config
-	httpMux        *chi.Mux
-	httpsMux       *chi.Mux
-	cert           tls.Certificate
+	dnsServers    []*dns.Server
+	queryResolver resolver.ChainedResolver
+	cfg           *config.Config
+
+	servers map[net.Listener]*httpServer
 }
 
 func logger() *logrus.Entry {
@@ -71,19 +60,11 @@ func tlsCipherSuites() []uint16 {
 	return tlsCipherSuites
 }
 
-func getServerAddress(addr string) string {
-	if !strings.Contains(addr, ":") {
-		addr = fmt.Sprintf(":%s", addr)
-	}
-
-	return addr
-}
-
 type NewServerFunc func(address string) (*dns.Server, error)
 
 func retrieveCertificate(cfg *config.Config) (cert tls.Certificate, err error) {
 	if cfg.CertFile == "" && cfg.KeyFile == "" {
-		cert, err = createSelfSignedCert()
+		cert, err = util.TLSGenerateSelfSignedCert([]string{"blocky.invalid", "*"})
 		if err != nil {
 			return tls.Certificate{}, fmt.Errorf("unable to generate self-signed certificate: %w", err)
 		}
@@ -99,35 +80,45 @@ func retrieveCertificate(cfg *config.Config) (cert tls.Certificate, err error) {
 	return
 }
 
+func newTLSConfig(cfg *config.Config) (*tls.Config, error) {
+	var cert tls.Certificate
+
+	cert, err := retrieveCertificate(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("can't retrieve cert: %w", err)
+	}
+
+	// #nosec G402 // See TLSVersion.validate
+	res := &tls.Config{
+		MinVersion:   uint16(cfg.MinTLSServeVer),
+		CipherSuites: tlsCipherSuites(),
+		Certificates: []tls.Certificate{cert},
+	}
+
+	return res, nil
+}
+
 // NewServer creates new server instance with passed config
 //
 //nolint:funlen
 func NewServer(ctx context.Context, cfg *config.Config) (server *Server, err error) {
-	var cert tls.Certificate
+	var tlsCfg *tls.Config
 
 	if len(cfg.Ports.HTTPS) > 0 || len(cfg.Ports.TLS) > 0 {
-		cert, err = retrieveCertificate(cfg)
+		tlsCfg, err = newTLSConfig(cfg)
 		if err != nil {
-			return nil, fmt.Errorf("can't retrieve cert: %w", err)
+			return nil, err
 		}
 	}
 
-	dnsServers, err := createServers(cfg, cert)
+	dnsServers, err := createServers(cfg, tlsCfg)
 	if err != nil {
 		return nil, fmt.Errorf("server creation failed: %w", err)
 	}
 
-	httpRouter := createHTTPRouter(cfg)
-	httpsRouter := createHTTPSRouter(cfg)
-
-	httpListeners, httpsListeners, err := createHTTPListeners(cfg)
+	httpListeners, httpsListeners, err := createHTTPListeners(cfg, tlsCfg)
 	if err != nil {
 		return nil, err
-	}
-
-	if len(httpListeners) != 0 || len(httpsListeners) != 0 {
-		metrics.Start(httpRouter, cfg.Prometheus)
-		metrics.Start(httpsRouter, cfg.Prometheus)
 	}
 
 	metrics.RegisterEventListeners()
@@ -151,42 +142,52 @@ func NewServer(ctx context.Context, cfg *config.Config) (server *Server, err err
 	}
 
 	server = &Server{
-		dnsServers:     dnsServers,
-		queryResolver:  queryResolver,
-		cfg:            cfg,
-		httpListeners:  httpListeners,
-		httpsListeners: httpsListeners,
-		httpMux:        httpRouter,
-		httpsMux:       httpsRouter,
-		cert:           cert,
+		dnsServers:    dnsServers,
+		queryResolver: queryResolver,
+		cfg:           cfg,
+
+		servers: make(map[net.Listener]*httpServer),
 	}
 
 	server.printConfiguration()
 
 	server.registerDNSHandlers(ctx)
-	err = server.registerAPIEndpoints(httpRouter)
 
+	openAPIImpl, err := server.createOpenAPIInterfaceImpl()
 	if err != nil {
 		return nil, err
 	}
 
-	err = server.registerAPIEndpoints(httpsRouter)
+	httpRouter := createHTTPRouter(cfg, openAPIImpl)
+	server.registerDoHEndpoints(httpRouter)
 
-	if err != nil {
-		return nil, err
+	if len(cfg.Ports.HTTP) != 0 {
+		srv := newHTTPServer("http", httpRouter, cfg)
+
+		for _, l := range httpListeners {
+			server.servers[l] = srv
+		}
+	}
+
+	if len(cfg.Ports.HTTPS) != 0 {
+		srv := newHTTPServer("https", httpRouter, cfg)
+
+		for _, l := range httpsListeners {
+			server.servers[l] = srv
+		}
 	}
 
 	return server, err
 }
 
-func createServers(cfg *config.Config, cert tls.Certificate) ([]*dns.Server, error) {
+func createServers(cfg *config.Config, tlsCfg *tls.Config) ([]*dns.Server, error) {
 	var dnsServers []*dns.Server
 
 	var err *multierror.Error
 
 	addServers := func(newServer NewServerFunc, addresses config.ListenConfig) error {
 		for _, address := range addresses {
-			server, err := newServer(getServerAddress(address))
+			server, err := newServer(address)
 			if err != nil {
 				return err
 			}
@@ -201,19 +202,21 @@ func createServers(cfg *config.Config, cert tls.Certificate) ([]*dns.Server, err
 		addServers(createUDPServer, cfg.Ports.DNS),
 		addServers(createTCPServer, cfg.Ports.DNS),
 		addServers(func(address string) (*dns.Server, error) {
-			return createTLSServer(cfg, address, cert)
+			return createTLSServer(address, tlsCfg)
 		}, cfg.Ports.TLS))
 
 	return dnsServers, err.ErrorOrNil()
 }
 
-func createHTTPListeners(cfg *config.Config) (httpListeners, httpsListeners []net.Listener, err error) {
-	httpListeners, err = newListeners("http", cfg.Ports.HTTP)
+func createHTTPListeners(
+	cfg *config.Config, tlsCfg *tls.Config,
+) (httpListeners, httpsListeners []net.Listener, err error) {
+	httpListeners, err = newTCPListeners("http", cfg.Ports.HTTP)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	httpsListeners, err = newListeners("https", cfg.Ports.HTTPS)
+	httpsListeners, err = newTLSListeners("https", cfg.Ports.HTTPS, tlsCfg)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -221,11 +224,11 @@ func createHTTPListeners(cfg *config.Config) (httpListeners, httpsListeners []ne
 	return httpListeners, httpsListeners, nil
 }
 
-func newListeners(proto string, addresses config.ListenConfig) ([]net.Listener, error) {
+func newTCPListeners(proto string, addresses config.ListenConfig) ([]net.Listener, error) {
 	listeners := make([]net.Listener, 0, len(addresses))
 
 	for _, address := range addresses {
-		listener, err := net.Listen("tcp", getServerAddress(address))
+		listener, err := net.Listen("tcp", address)
 		if err != nil {
 			return nil, fmt.Errorf("start %s listener on %s failed: %w", proto, address, err)
 		}
@@ -236,17 +239,25 @@ func newListeners(proto string, addresses config.ListenConfig) ([]net.Listener, 
 	return listeners, nil
 }
 
-func createTLSServer(cfg *config.Config, address string, cert tls.Certificate) (*dns.Server, error) {
+func newTLSListeners(proto string, addresses config.ListenConfig, tlsCfg *tls.Config) ([]net.Listener, error) {
+	listeners, err := newTCPListeners(proto, addresses)
+	if err != nil {
+		return nil, err
+	}
+
+	for i, inner := range listeners {
+		listeners[i] = tls.NewListener(inner, tlsCfg)
+	}
+
+	return listeners, nil
+}
+
+func createTLSServer(address string, tlsCfg *tls.Config) (*dns.Server, error) {
 	return &dns.Server{
-		Addr: address,
-		Net:  "tcp-tls",
-		//nolint:gosec
-		TLSConfig: &tls.Config{
-			Certificates: []tls.Certificate{cert},
-			MinVersion:   uint16(cfg.MinTLSServeVer),
-			CipherSuites: tlsCipherSuites(),
-		},
-		Handler: dns.NewServeMux(),
+		Addr:      address,
+		Net:       "tcp-tls",
+		TLSConfig: tlsCfg,
+		Handler:   dns.NewServeMux(),
 		NotifyStartedFunc: func() {
 			logger().Infof("TLS server is up and running on address %s", address)
 		},
@@ -276,104 +287,6 @@ func createUDPServer(address string) (*dns.Server, error) {
 	}, nil
 }
 
-//nolint:funlen
-func createSelfSignedCert() (tls.Certificate, error) {
-	// Create CA
-	ca := &x509.Certificate{
-		//nolint:gosec
-		SerialNumber:          big.NewInt(int64(mrand.Intn(math.MaxInt))),
-		NotBefore:             time.Now(),
-		NotAfter:              time.Now().AddDate(caExpiryYears, 0, 0),
-		IsCA:                  true,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
-		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
-		BasicConstraintsValid: true,
-	}
-
-	caPrivKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return tls.Certificate{}, err
-	}
-
-	caBytes, err := x509.CreateCertificate(rand.Reader, ca, ca, &caPrivKey.PublicKey, caPrivKey)
-	if err != nil {
-		return tls.Certificate{}, err
-	}
-
-	caPEM := new(bytes.Buffer)
-	if err = pem.Encode(caPEM, &pem.Block{
-		Type:  "CERTIFICATE",
-		Bytes: caBytes,
-	}); err != nil {
-		return tls.Certificate{}, err
-	}
-
-	caPrivKeyPEM := new(bytes.Buffer)
-
-	b, err := x509.MarshalECPrivateKey(caPrivKey)
-	if err != nil {
-		return tls.Certificate{}, err
-	}
-
-	if err = pem.Encode(caPrivKeyPEM, &pem.Block{
-		Type:  "EC PRIVATE KEY",
-		Bytes: b,
-	}); err != nil {
-		return tls.Certificate{}, err
-	}
-
-	// Create certificate
-	cert := &x509.Certificate{
-		//nolint:gosec
-		SerialNumber: big.NewInt(int64(mrand.Intn(math.MaxInt))),
-		DNSNames:     []string{"*"},
-		NotBefore:    time.Now(),
-		NotAfter:     time.Now().AddDate(certExpiryYears, 0, 0),
-		SubjectKeyId: []byte{1, 2, 3, 4, 6},
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
-		KeyUsage:     x509.KeyUsageDigitalSignature,
-	}
-
-	certPrivKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return tls.Certificate{}, err
-	}
-
-	certBytes, err := x509.CreateCertificate(rand.Reader, cert, ca, &certPrivKey.PublicKey, caPrivKey)
-	if err != nil {
-		return tls.Certificate{}, err
-	}
-
-	certPEM := new(bytes.Buffer)
-	if err = pem.Encode(certPEM, &pem.Block{
-		Type:  "CERTIFICATE",
-		Bytes: certBytes,
-	}); err != nil {
-		return tls.Certificate{}, err
-	}
-
-	certPrivKeyPEM := new(bytes.Buffer)
-
-	b, err = x509.MarshalECPrivateKey(certPrivKey)
-	if err != nil {
-		return tls.Certificate{}, err
-	}
-
-	if err = pem.Encode(certPrivKeyPEM, &pem.Block{
-		Type:  "EC PRIVATE KEY",
-		Bytes: b,
-	}); err != nil {
-		return tls.Certificate{}, err
-	}
-
-	keyPair, err := tls.X509KeyPair(certPEM.Bytes(), certPrivKeyPEM.Bytes())
-	if err != nil {
-		return tls.Certificate{}, err
-	}
-
-	return keyPair, nil
-}
-
 func createQueryResolver(
 	ctx context.Context,
 	cfg *config.Config,
@@ -383,12 +296,14 @@ func createQueryResolver(
 	upstreamTree, utErr := resolver.NewUpstreamTreeResolver(ctx, cfg.Upstreams, bootstrap)
 	blocking, blErr := resolver.NewBlockingResolver(ctx, cfg.Blocking, redisClient, bootstrap)
 	clientNames, cnErr := resolver.NewClientNamesResolver(ctx, cfg.ClientLookup, cfg.Upstreams, bootstrap)
+	queryLogging, qlErr := resolver.NewQueryLoggingResolver(ctx, cfg.QueryLog)
 	condUpstream, cuErr := resolver.NewConditionalUpstreamResolver(ctx, cfg.Conditional, cfg.Upstreams, bootstrap)
 	hostsFile, hfErr := resolver.NewHostsFileResolver(ctx, cfg.HostsFile, bootstrap)
 
 	err := multierror.Append(
 		multierror.Prefix(utErr, "upstream tree resolver: "),
 		multierror.Prefix(blErr, "blocking resolver: "),
+		multierror.Prefix(qlErr, "query logging resolver: "),
 		multierror.Prefix(cnErr, "client names resolver: "),
 		multierror.Prefix(cuErr, "conditional upstream resolver: "),
 		multierror.Prefix(hfErr, "hosts file resolver: "),
@@ -403,7 +318,7 @@ func createQueryResolver(
 		resolver.NewECSResolver(cfg.ECS),
 		clientNames,
 		resolver.NewEDEResolver(cfg.EDE),
-		resolver.NewQueryLoggingResolver(ctx, cfg.QueryLog),
+		queryLogging,
 		resolver.NewMetricsResolver(cfg.Prometheus),
 		resolver.NewRewriterResolver(cfg.CustomDNS.RewriterConfig, resolver.NewCustomDNSResolver(cfg.CustomDNS)),
 		hostsFile,
@@ -470,12 +385,6 @@ func toMB(b uint64) uint64 {
 	return b / bytesInKB / bytesInKB
 }
 
-const (
-	readHeaderTimeout = 20 * time.Second
-	readTimeout       = 20 * time.Second
-	writeTimeout      = 20 * time.Second
-)
-
 // Start starts the server
 func (s *Server) Start(ctx context.Context, errCh chan<- error) {
 	logger().Info("Starting server")
@@ -490,48 +399,15 @@ func (s *Server) Start(ctx context.Context, errCh chan<- error) {
 		}()
 	}
 
-	for i, listener := range s.httpListeners {
-		listener := listener
-		address := s.cfg.Ports.HTTP[i]
+	for listener, srv := range s.servers {
+		listener, srv := listener, srv
 
 		go func() {
-			logger().Infof("http server is up and running on addr/port %s", address)
+			logger().Infof("%s server is up and running on addr/port %s", srv, listener.Addr())
 
-			srv := &http.Server{
-				ReadTimeout:       readTimeout,
-				ReadHeaderTimeout: readHeaderTimeout,
-				WriteTimeout:      writeTimeout,
-				Handler:           s.httpsMux,
-			}
-
-			if err := srv.Serve(listener); err != nil {
-				errCh <- fmt.Errorf("start http listener failed: %w", err)
-			}
-		}()
-	}
-
-	for i, listener := range s.httpsListeners {
-		listener := listener
-		address := s.cfg.Ports.HTTPS[i]
-
-		go func() {
-			logger().Infof("https server is up and running on addr/port %s", address)
-
-			server := http.Server{
-				Handler:           s.httpsMux,
-				ReadTimeout:       readTimeout,
-				ReadHeaderTimeout: readHeaderTimeout,
-				WriteTimeout:      writeTimeout,
-				//nolint:gosec
-				TLSConfig: &tls.Config{
-					MinVersion:   uint16(s.cfg.MinTLSServeVer),
-					CipherSuites: tlsCipherSuites(),
-					Certificates: []tls.Certificate{s.cert},
-				},
-			}
-
-			if err := server.ServeTLS(listener, "", ""); err != nil {
-				errCh <- fmt.Errorf("start https listener failed: %w", err)
+			err := srv.Serve(ctx, listener)
+			if err != nil {
+				errCh <- fmt.Errorf("%s on %s: %w", srv, listener.Addr(), err)
 			}
 		}()
 	}

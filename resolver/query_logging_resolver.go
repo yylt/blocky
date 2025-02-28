@@ -2,6 +2,10 @@ package resolver
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/0xERR0R/blocky/config"
@@ -25,12 +29,41 @@ type QueryLoggingResolver struct {
 	NextResolver
 	typed
 
-	logChan chan *querylog.LogEntry
-	writer  querylog.Writer
+	logChan    chan *querylog.LogEntry
+	writer     querylog.Writer
+	instanceID string
+}
+
+func GetQueryLoggingWriter(ctx context.Context, cfg config.QueryLog) (querylog.Writer, error) {
+	var writer querylog.Writer
+
+	var err error
+
+	switch cfg.Type {
+	case config.QueryLogTypeCsv:
+		writer, err = querylog.NewCSVWriter(cfg.Target, false, cfg.LogRetentionDays)
+	case config.QueryLogTypeCsvClient:
+		writer, err = querylog.NewCSVWriter(cfg.Target, true, cfg.LogRetentionDays)
+	case config.QueryLogTypeMysql:
+		writer, err = querylog.NewDatabaseWriter(ctx, "mysql", cfg.Target, cfg.LogRetentionDays,
+			cfg.FlushInterval.ToDuration())
+	case config.QueryLogTypePostgresql:
+		writer, err = querylog.NewDatabaseWriter(ctx, "postgresql", cfg.Target, cfg.LogRetentionDays,
+			cfg.FlushInterval.ToDuration())
+	case config.QueryLogTypeTimescale:
+		writer, err = querylog.NewDatabaseWriter(ctx, "timescale", cfg.Target, cfg.LogRetentionDays,
+			cfg.FlushInterval.ToDuration())
+	case config.QueryLogTypeConsole:
+		writer = querylog.NewLoggerWriter()
+	case config.QueryLogTypeNone:
+		writer = querylog.NewNoneWriter()
+	}
+
+	return writer, err
 }
 
 // NewQueryLoggingResolver returns a new resolver instance
-func NewQueryLoggingResolver(ctx context.Context, cfg config.QueryLog) *QueryLoggingResolver {
+func NewQueryLoggingResolver(ctx context.Context, cfg config.QueryLog) (*QueryLoggingResolver, error) {
 	logger := log.PrefixedLog(queryLoggingResolverType)
 
 	var writer querylog.Writer
@@ -39,22 +72,7 @@ func NewQueryLoggingResolver(ctx context.Context, cfg config.QueryLog) *QueryLog
 		func() error {
 			var err error
 
-			switch cfg.Type {
-			case config.QueryLogTypeCsv:
-				writer, err = querylog.NewCSVWriter(cfg.Target, false, cfg.LogRetentionDays)
-			case config.QueryLogTypeCsvClient:
-				writer, err = querylog.NewCSVWriter(cfg.Target, true, cfg.LogRetentionDays)
-			case config.QueryLogTypeMysql:
-				writer, err = querylog.NewDatabaseWriter(ctx, "mysql", cfg.Target, cfg.LogRetentionDays,
-					cfg.FlushInterval.ToDuration())
-			case config.QueryLogTypePostgresql:
-				writer, err = querylog.NewDatabaseWriter(ctx, "postgresql", cfg.Target, cfg.LogRetentionDays,
-					cfg.FlushInterval.ToDuration())
-			case config.QueryLogTypeConsole:
-				writer = querylog.NewLoggerWriter()
-			case config.QueryLogTypeNone:
-				writer = querylog.NewNoneWriter()
-			}
+			writer, err = GetQueryLoggingWriter(ctx, cfg)
 
 			return err
 		},
@@ -73,23 +91,30 @@ func NewQueryLoggingResolver(ctx context.Context, cfg config.QueryLog) *QueryLog
 		cfg.Type = config.QueryLogTypeConsole
 	}
 
+	instanceID, err := readInstanceID("/etc/hostname")
+	if err != nil {
+		return nil, err
+	}
+
 	logChan := make(chan *querylog.LogEntry, logChanCap)
 
 	resolver := QueryLoggingResolver{
 		configurable: withConfig(&cfg),
 		typed:        withType(queryLoggingResolverType),
 
-		logChan: logChan,
-		writer:  writer,
+		logChan:    logChan,
+		writer:     writer,
+		instanceID: instanceID,
 	}
 
 	go resolver.writeLog(ctx)
 
-	if cfg.LogRetentionDays > 0 {
+	// Timescale uses database features for retention
+	if cfg.LogRetentionDays > 0 && cfg.Type != config.QueryLogTypeTimescale {
 		go resolver.periodicCleanUp(ctx)
 	}
 
-	return &resolver
+	return &resolver, nil
 }
 
 // triggers periodically cleanup of old log files
@@ -156,9 +181,10 @@ func (r *QueryLoggingResolver) createLogEntry(request *model.Request, response *
 	start time.Time, durationMs int64,
 ) *querylog.LogEntry {
 	entry := querylog.LogEntry{
-		Start:       start,
-		ClientIP:    "0.0.0.0",
-		ClientNames: []string{"none"},
+		Start:          start,
+		ClientIP:       "0.0.0.0",
+		ClientNames:    []string{"none"},
+		BlockyInstance: r.instanceID,
 	}
 
 	for _, f := range r.cfg.Fields {
@@ -200,7 +226,7 @@ func (r *QueryLoggingResolver) writeLog(ctx context.Context) {
 
 			r.writer.Write(logEntry)
 
-			halfCap := cap(r.logChan) / 2 //nolint:gomnd
+			halfCap := cap(r.logChan) / 2 //nolint:mnd
 
 			// if log channel is > 50% full, this could be a problem with slow writer (external storage over network etc.)
 			if len(r.logChan) > halfCap {
@@ -212,4 +238,20 @@ func (r *QueryLoggingResolver) writeLog(ctx context.Context) {
 			return
 		}
 	}
+}
+
+func readInstanceID(file string) (string, error) {
+	// Prefer /etc/hostname over os.Hostname to allow easy differentiation in a Docker Swarm
+	// See details in https://github.com/0xERR0R/blocky/pull/756
+	hn, fErr := os.ReadFile(file)
+	if fErr == nil {
+		return strings.TrimSpace(string(hn)), nil
+	}
+
+	hostname, osErr := os.Hostname()
+	if osErr == nil {
+		return hostname, nil
+	}
+
+	return "", fmt.Errorf("cannot determine instance ID: %w", errors.Join(fErr, osErr))
 }

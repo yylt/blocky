@@ -108,6 +108,7 @@ func (v *TLSVersion) validate(logger *logrus.Entry) {
 // postgresql // PostgreSQL database
 // csv // CSV file per day
 // csv-client // CSV file per day and client
+// timescale // Timescale database
 // )
 type QueryLogType int16
 
@@ -169,6 +170,13 @@ func (l *ListenConfig) UnmarshalText(data []byte) error {
 	addresses := string(data)
 
 	*l = strings.Split(addresses, ",")
+
+	// Prefix all ports with :
+	for i, addr := range *l {
+		if !strings.ContainsRune(addr, ':') {
+			(*l)[i] = ":" + addr
+		}
+	}
 
 	return nil
 }
@@ -397,9 +405,12 @@ func recoverToError(do func(context.Context) error, onPanic func(any) error) fun
 }
 
 type Downloader struct {
-	Timeout  Duration `yaml:"timeout" default:"5s"`
-	Attempts uint     `yaml:"attempts" default:"3"`
-	Cooldown Duration `yaml:"cooldown" default:"500ms"`
+	Timeout           Duration `yaml:"timeout" default:"5s"`
+	ReadTimeout       Duration `yaml:"readTimeout" default:"20s"`
+	ReadHeaderTimeout Duration `yaml:"readHeaderTimeout" default:"20s"`
+	WriteTimeout      Duration `yaml:"writeTimeout" default:"20s"`
+	Attempts          uint     `yaml:"attempts" default:"3"`
+	Cooldown          Duration `yaml:"cooldown" default:"500ms"`
 }
 
 func (c *Downloader) LogConfig(logger *logrus.Entry) {
@@ -466,7 +477,6 @@ func loadConfig(logger *logrus.Entry, path string, mandatory bool) (rCfg *Config
 		prettyPath = filepath.Join(path, "*")
 
 		data, err = readFromDir(path, data)
-
 		if err != nil {
 			return nil, fmt.Errorf("can't read config files: %w", err)
 		}
