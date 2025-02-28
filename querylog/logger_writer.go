@@ -8,7 +8,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-const loggerPrefixLoggerWriter = "queryLog"
+const loggerPrefixLoggerWriter = "query"
 
 type LoggerWriter struct {
 	logger *logrus.Entry
@@ -19,9 +19,17 @@ func NewLoggerWriter() *LoggerWriter {
 }
 
 func (d *LoggerWriter) Write(entry *LogEntry) {
-	fields := LogEntryFields(entry)
-
-	d.logger.WithFields(fields).Infof("query resolved")
+	d.logger.WithFields(
+		logrus.Fields{
+			"cli_ip":  entry.ClientIP,
+			"reason":  entry.ResponseReason,
+			"rcode":   entry.ResponseCode,
+			"qname":   entry.QuestionName,
+			"qtype":   entry.QuestionType,
+			"answer":  entry.Answer,
+			"time_ms": entry.DurationMs,
+		},
+	).Infof("")
 }
 
 func (d *LoggerWriter) CleanUp() {
