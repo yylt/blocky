@@ -10,12 +10,13 @@ import (
 type Caching struct {
 	MinCachingTime        Duration `yaml:"minTime"`
 	MaxCachingTime        Duration `yaml:"maxTime"`
-	CacheTimeNegative     Duration `yaml:"cacheTimeNegative" default:"30m"`
+	CacheTimeNegative     Duration `default:"30m"                yaml:"cacheTimeNegative"`
 	MaxItemsCount         int      `yaml:"maxItemsCount"`
 	Prefetching           bool     `yaml:"prefetching"`
-	PrefetchExpires       Duration `yaml:"prefetchExpires" default:"2h"`
-	PrefetchThreshold     int      `yaml:"prefetchThreshold" default:"5"`
+	PrefetchExpires       Duration `default:"2h"                 yaml:"prefetchExpires"`
+	PrefetchThreshold     int      `default:"5"                  yaml:"prefetchThreshold"`
 	PrefetchMaxItemsCount int      `yaml:"prefetchMaxItemsCount"`
+	Exclude               []string `yaml:"exclude"`
 }
 
 // IsEnabled implements `config.Configurable`.
@@ -28,6 +29,10 @@ func (c *Caching) LogConfig(logger *logrus.Entry) {
 	logger.Infof("minTime = %s", c.MinCachingTime)
 	logger.Infof("maxTime = %s", c.MaxCachingTime)
 	logger.Infof("cacheTimeNegative = %s", c.CacheTimeNegative)
+	logger.Infof("exclude:")
+	for _, val := range c.Exclude {
+		logger.Infof("- %v", val)
+	}
 
 	if c.Prefetching {
 		logger.Infof("prefetching:")

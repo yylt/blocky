@@ -83,7 +83,7 @@ func NewBootstrap(ctx context.Context, cfg *config.Config) (b *Bootstrap, err er
 	}
 
 	pbCfg := config.NewUpstreamGroup("<bootstrap>", cfg.Upstreams, nil)
-	pbCfg.Upstreams.Groups = nil // To be on the safe side it doesn't try to use anything besides the bootstrap
+	pbCfg.Groups = nil // To be on the safe side it doesn't try to use anything besides the bootstrap
 
 	// Always enable prefetching to avoid stalling user requests
 	// Otherwise, a request to blocky could end up waiting for 2 DNS requests:
@@ -98,11 +98,12 @@ func NewBootstrap(ctx context.Context, cfg *config.Config) (b *Bootstrap, err er
 	}
 
 	b.bootstraped = bootstraped
+	cachingResolver, _ := newCachingResolver(ctx, cachingCfg, nil, false)
 
 	b.resolver = Chain(
 		NewFilteringResolver(cfg.Filtering),
 		// false: no metrics, to not overwrite the main blocking resolver ones
-		newCachingResolver(ctx, cachingCfg, nil, false),
+		cachingResolver,
 		newParallelBestResolver(pbCfg, bootstraped.Resolvers()),
 	)
 

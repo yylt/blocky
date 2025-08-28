@@ -26,11 +26,12 @@ import (
 )
 
 const (
-	dohMessageLimit   = 512
-	contentTypeHeader = "content-type"
-	dnsContentType    = "application/dns-message"
-	htmlContentType   = "text/html; charset=UTF-8"
-	yamlContentType   = "text/yaml"
+	dohMessageLimit    = 512
+	contentTypeHeader  = "Content-Type"
+	cacheControlHeader = "cache-control"
+	dnsContentType     = "application/dns-message"
+	htmlContentType    = "text/html; charset=UTF-8"
+	yamlContentType    = "text/yaml"
 )
 
 func (s *Server) createOpenAPIInterfaceImpl() (impl api.StrictServerInterface, err error) {
@@ -52,8 +53,8 @@ func (s *Server) createOpenAPIInterfaceImpl() (impl api.StrictServerInterface, e
 	return api.NewOpenAPIInterfaceImpl(bControl, s, refresher, cacheControl), nil
 }
 
-func (s *Server) registerDoHEndpoints(router *chi.Mux) {
-	const pathDohQuery = "/dns-query"
+func (s *Server) registerDoHEndpoints(router *chi.Mux, cfg *config.Config) {
+	pathDohQuery := cfg.Ports.DOHPath
 
 	router.Get(pathDohQuery, s.dohGetRequestHandler)
 	router.Get(pathDohQuery+"/", s.dohGetRequestHandler)
@@ -67,6 +68,12 @@ func (s *Server) dohGetRequestHandler(rw http.ResponseWriter, req *http.Request)
 	dnsParam, ok := req.URL.Query()["dns"]
 	if !ok || len(dnsParam[0]) < 1 {
 		http.Error(rw, "dns param is missing", http.StatusBadRequest)
+
+		return
+	}
+
+	if len(dnsParam[0]) > base64.RawURLEncoding.EncodedLen(dohMessageLimit) {
+		http.Error(rw, "URI Too Long", http.StatusRequestURITooLong)
 
 		return
 	}
@@ -88,14 +95,14 @@ func (s *Server) dohGetRequestHandler(rw http.ResponseWriter, req *http.Request)
 }
 
 func (s *Server) dohPostRequestHandler(rw http.ResponseWriter, req *http.Request) {
-	contentType := req.Header.Get("Content-type")
+	contentType := req.Header.Get(contentTypeHeader)
 	if contentType != dnsContentType {
 		http.Error(rw, "unsupported content type", http.StatusUnsupportedMediaType)
 
 		return
 	}
 
-	rawMsg, err := io.ReadAll(req.Body)
+	rawMsg, err := io.ReadAll(io.LimitReader(req.Body, int64(dohMessageLimit)+1))
 	if err != nil {
 		http.Error(rw, err.Error(), http.StatusBadRequest)
 
@@ -135,7 +142,11 @@ func (r httpMsgWriter) WriteMsg(msg *dns.Msg) error {
 		return err
 	}
 
-	r.rw.Header().Set("content-type", dnsContentType)
+	r.rw.Header().Set(contentTypeHeader, dnsContentType)
+
+	// https://www.rfc-editor.org/rfc/rfc8484#section-5.1
+	// get the smallest TTL from answer
+	r.rw.Header().Set(cacheControlHeader, fmt.Sprintf("max-age=%d", getSmallestTTLFromAnswer(msg)))
 
 	// https://www.rfc-editor.org/rfc/rfc8484#section-4.2.1
 	r.rw.WriteHeader(http.StatusOK)
@@ -143,6 +154,17 @@ func (r httpMsgWriter) WriteMsg(msg *dns.Msg) error {
 	_, err = r.rw.Write(b)
 
 	return err
+}
+
+func getSmallestTTLFromAnswer(msg *dns.Msg) uint32 {
+	var ttl uint32 = 0
+	for _, a := range msg.Answer {
+		if a.Header().Ttl < ttl || ttl == 0 {
+			ttl = a.Header().Ttl
+		}
+	}
+
+	return ttl
 }
 
 func (s *Server) Query(

@@ -25,23 +25,27 @@ configuration properties as [JSON](config.yml).
     connectIPVersion: v4
     ```
 
-## Ports configuration
+## Ports & addresses configuration
 
-All logging port are optional.
+All values in this section are optional.
 
-| Parameter   | Type                    | Default value | Description                                                                                                                                                                                                                                       |
-| ----------- | ----------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ports.dns   | [IP]:port[,[IP]:port]\* | 53            | Port(s) and optional bind ip address(es) to serve DNS endpoint (TCP and UDP). If you wish to specify a specific IP, you can do so such as `192.168.0.1:53`. Example: `53`, `:53`, `127.0.0.1:53,[::1]:53`                                         |
-| ports.tls   | [IP]:port[,[IP]:port]\* |               | Port(s) and optional bind ip address(es) to serve DoT DNS endpoint (DNS-over-TLS). If you wish to specify a specific IP, you can do so such as `192.168.0.1:853`. Example: `83`, `:853`, `127.0.0.1:853,[::1]:853`                                |
-| ports.http  | [IP]:port[,[IP]:port]\* |               | Port(s) and optional bind ip address(es) to serve HTTP used for prometheus metrics, pprof, REST API, DoH... If you wish to specify a specific IP, you can do so such as `192.168.0.1:4000`. Example: `4000`, `:4000`, `127.0.0.1:4000,[::1]:4000` |
-| ports.https | [IP]:port[,[IP]:port]\* |               | Port(s) and optional bind ip address(es) to serve HTTPS used for prometheus metrics, pprof, REST API, DoH... If you wish to specify a specific IP, you can do so such as `192.168.0.1:443`. Example: `443`, `:443`, `127.0.0.1:443,[::1]:443`     |
+| Parameter   | Type                  | Default value | Description                                                                                                                                       |
+| ----------- | --------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ports.dns   | One or more [IP]:Port | 53            | Listen address for DNS (TCP and UDP). Example: `53`, `:53`, `192.168.0.1:53`, `[53, "[::1]:53"]`                                                  |
+| ports.tls   | One or more [IP]:Port |               | Listen address for DoT (DNS-over-TLS). Example: `83`, `:853`, `192.168.0.1:853`, `[853, "[::1]:853"]`                                             |
+| ports.http  | One or more [IP]:Port |               | Listen address for HTTP used for prometheus metrics, pprof, REST API, DoH... Example: `4000`, `:4000`, `192.168.0.1:4000`, `[4000, "[::1]:4000"]` |
+| ports.https | One or more [IP]:Port |               | Listen address for HTTPS used for prometheus metrics, pprof, REST API, DoH... Example: `443`, `:443`, `192.168.0.1:443`, `[443, "[::1]:443"]`     |
+| ports.dohPath | string | /dns-query | URL path for DoH queries.
 
 !!! example
 
     ```yaml
     ports:
       dns: 53
-      http: 4000
+      tls: [853, "[::1]:853"]
+      http:
+        - 80
+        - 4000
       https: 443
     ```
 
@@ -240,9 +244,9 @@ This configuration will drop all 'AAAA' (IPv6) queries.
 
 ## FQDN only
 
-In domain environments, it may be useful to only response to FQDN requests. If this option is enabled blocky respond immediately
-with NXDOMAIN if the request is not a valid FQDN. The request is therefore not further processed by other options like custom or conditional.
-Please be aware that by enabling it your hostname resolution will break unless every hostname is part of a domain.
+In domain environments, it may be useful to only respond to FQDN requests. If this option is enabled blocky will respond immediately
+with NXDOMAIN if the request is not a valid FQDN. The request is therefore not processed further by other options like custom or conditional.
+Please be aware that by enabling this your resolution will break unless every query is for a fully qualified domain name.
 
 !!! example
 
@@ -253,55 +257,99 @@ Please be aware that by enabling it your hostname resolution will break unless e
 
 ## Custom DNS
 
-You can define your own domain name to IP mappings. For example, you can use a user-friendly name for a network printer
-or define a domain name for your local device in order to use the HTTPS certificate. Multiple IP addresses for one
-domain must be separated by a comma.
+You can define your own domain name mappings for local DNS resolution. This is useful for creating user-friendly names for network devices, defining domain names for local services, or creating your own DNS zone.
 
-| Parameter           | Type                                                   | Mandatory | Default value |
-| ------------------- | ------------------------------------------------------ | --------- | ------------- |
-| customTTL           | duration used for simple mappings (no unit is minutes) | no        | 1h            |
-| rewrite             | string: string (domain: domain)                        | no        |               |
-| mapping             | string: string (hostname: address or CNAME)            | no        |               |
-| zone                | string containing a DNS Zone                           | no        |               |
-| filterUnmappedTypes | boolean                                                | no        | true          |
+Custom DNS supports multiple record types (A, AAAA, CNAME, TXT, SRV) and provides automatic reverse DNS lookups for defined IP addresses.
+
+| Parameter           | Type                                                   | Mandatory | Default value | Description                                                                                |
+| ------------------- | ------------------------------------------------------ | --------- | ------------- | ------------------------------------------------------------------------------------------ |
+| customTTL           | duration used for simple mappings (no unit is minutes) | no        | 1h            | Time-to-live for DNS records defined in the mapping section                                |
+| rewrite             | string: string (domain: domain)                        | no        |               | Domain rewriting rules applied before DNS resolution                                       |
+| mapping             | string: string (hostname: address or CNAME)            | no        |               | Simple domain to IP/CNAME mappings                                                         |
+| zone                | string containing a DNS Zone                           | no        |               | DNS zone file content for more complex configurations                                      |
+| filterUnmappedTypes | boolean                                                | no        | true          | Whether to filter query types that aren't defined for a domain or forward them to upstream |
+
+### Simple Mapping
+
+The `mapping` parameter allows you to define simple domain-to-IP mappings. You can specify multiple IP addresses for a single domain by separating them with commas.
 
 !!! example
 
     ```yaml
     customDNS:
       customTTL: 1h
-      filterUnmappedTypes: true
-      rewrite:
-        home: lan
-        replace-me.com: with-this.com
       mapping:
         printer.lan: 192.168.178.3
         otherdevice.lan: 192.168.178.15,2001:0db8:85a3:08d3:1319:8a2e:0370:7344
+    ```
+
+This configuration will resolve:
+- `printer.lan` to IPv4 address `192.168.178.3`
+- `otherdevice.lan` to both IPv4 address `192.168.178.15` and IPv6 address `2001:0db8:85a3:08d3:1319:8a2e:0370:7344`
+
+### Subdomain Resolution
+
+Custom DNS automatically resolves subdomains of defined domains. For example, with the above configuration, queries for `my.printer.lan` or `any.subdomain.of.printer.lan` will also resolve to `192.168.178.3`.
+
+### Domain Rewriting
+
+With the optional `rewrite` parameter, you can replace part of a domain query with another string before resolution is performed:
+
+!!! example
+
+    ```yaml
+    customDNS:
+      rewrite:
+        home: lan
+        example.com: example-rewrite.com
+      mapping:
+        printer.lan: 192.168.178.3
+        example-rewrite.com: 1.2.3.4
+    ```
+
+With this configuration:
+- A query for `printer.home` will be rewritten to `printer.lan` and return `192.168.178.3`
+- A query for `sub.example.com` will be rewritten to `sub.example-rewrite.com` and return `1.2.3.4`
+
+### Zone File
+
+For more complex configurations, you can use the `zone` parameter to define a DNS zone file:
+
+!!! example
+
+    ```yaml
+    customDNS:
       zone: |
         $ORIGIN example.com.
         www 3600 A 1.2.3.4
+        www 3600 AAAA 2001:db8:85a3::8a2e:370:7334
         @ 3600 CNAME www
     ```
 
-This configuration will also resolve any subdomain of the defined domain, recursively. For example querying any of
-`printer.lan`, `my.printer.lan` or `i.love.my.printer.lan` will return 192.168.178.3.
-
-CNAME records are supported by utilizing the `zone` parameter. The zone file is a multiline string containing a [DNS Zone File](https://en.wikipedia.org/wiki/Zone_file#Example_file).
-For records defined using the `zone` parameter, the `customTTL` parameter is unused. Instead, the TTL is defined in the zone directly.
-The following directives are supported in the zone file:
-
+The zone file supports standard DNS zone file syntax including:
 - `$ORIGIN` - sets the origin for relative domain names
 - `$TTL` - sets the default TTL for records in the zone
 - `$INCLUDE` - includes another zone file relative to the blocky executable
 - `$GENERATE` - generates a range of records
 
-With the optional parameter `rewrite` you can replace domain part of the query with the defined part **before** the
-resolver lookup is performed.
-The query "printer.home" will be rewritten to "printer.lan" and return 192.168.178.3.
+For records defined using the `zone` parameter, the `customTTL` parameter is unused. Instead, the TTL is defined in the zone directly.
 
-With parameter `filterUnmappedTypes = true` (default), blocky will filter all queries with unmapped types, for example:
-AAAA for "printer.lan" or TXT for "otherdevice.lan".
-With `filterUnmappedTypes = false` a query AAAA "printer.lan" will be forwarded to the upstream DNS server.
+### CNAME Resolution
+
+When a CNAME record is defined and a query matches that record, blocky will:
+1. Return the CNAME record in the answer
+2. Additionally resolve the target of the CNAME and include those records in the answer
+3. Protect against CNAME loops (where CNAMEs point to each other in a loop)
+
+### Reverse DNS
+
+Blocky automatically creates reverse DNS (PTR) records for all defined A and AAAA records. This allows reverse lookups from IP addresses to domain names.
+
+### Filtering Unmapped Types
+
+With `filterUnmappedTypes = true` (default), blocky will filter all queries with unmapped types. For example, if you only define an A record for `printer.lan`, an AAAA query for the same domain will return an empty result.
+
+With `filterUnmappedTypes = false`, unmapped type queries will be forwarded to the upstream DNS server. For example, an AAAA query for `printer.lan` (when only an A record is defined) will be sent to the upstream resolver.
 
 ## Conditional DNS resolution
 
@@ -569,6 +617,7 @@ With following parameters you can tune the caching behavior:
 | caching.prefetchThreshold     | int             | no        | 5             | Name queries threshold for prefetch                                                                                                                                                                                                                                                                                                                                                                            |
 | caching.prefetchMaxItemsCount | int             | no        | 0 (unlimited) | Max number of domains to be kept in cache for prefetching (soft limit). Default (0): unlimited. Useful on systems with limited amount of RAM.                                                                                                                                                                                                                                                                  |
 | caching.cacheTimeNegative     | duration format | no        | 30m           | Time how long negative results (NXDOMAIN response or empty result) are cached. A value of -1 will disable caching for negative results.                                                                                                                                                                                                                                                                        |
+| caching.exclude               | Regex list      | no        |               | Exclusions rules as regex expressions of domains that won't be cached at all. Such as: /lan$/ or /^.*\.host\.com$/                                                                                                                                                                                                                                                                                                 |
 
 !!! example
 
@@ -577,6 +626,10 @@ With following parameters you can tune the caching behavior:
       minTime: 5m
       maxTime: 30m
       prefetching: true
+      exclude:
+        - /.*\.lan$/
+        - /.*\.local$/
+        - /.*\.host\.com\.(jp|fr)$/
     ```
 
 ## Redis

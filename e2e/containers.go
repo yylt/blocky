@@ -82,7 +82,7 @@ func createHTTPServerContainer(ctx context.Context, alias string, e2eNet *testco
 		Files: []testcontainers.ContainerFile{
 			{
 				HostFilePath:      file,
-				ContainerFilePath: fmt.Sprintf("/%s", filename),
+				ContainerFilePath: "/" + filename,
 				FileMode:          modeOwner,
 			},
 		},
@@ -164,6 +164,10 @@ func createMariaDBContainer(ctx context.Context, e2eNet *testcontainers.DockerNe
 func createBlockyContainer(ctx context.Context, e2eNet *testcontainers.DockerNetwork,
 	lines ...string,
 ) (testcontainers.Container, error) {
+	// Add timeout to context
+	ctx, cancel := context.WithTimeout(ctx, 2*startupTimeout)
+	defer cancel()
+
 	confFile := createTempFile(lines...)
 
 	cfg, err := config.LoadConfig(confFile, true)
@@ -221,8 +225,11 @@ func checkBlockyReadiness(ctx context.Context, cfg *config.Config, container tes
 	err = retry.Do(
 		func() error {
 			_, err = doDNSRequest(ctx, container, util.NewMsgWithQuestion("healthcheck.blocky.", dns.Type(dns.TypeA)))
+			if err != nil {
+				return fmt.Errorf("DNS request failed: %w", err)
+			}
 
-			return err
+			return nil
 		},
 		retry.OnRetry(func(n uint, err error) {
 			log.Infof("Performing retry DNS request #%d: %s\n", n, err)
@@ -257,18 +264,22 @@ func checkBlockyReadiness(ctx context.Context, cfg *config.Config, container tes
 }
 
 func doHTTPRequest(ctx context.Context, container testcontainers.Container, containerPort string) error {
-	host, port, err := getContainerHostPort(ctx, container, nat.Port(fmt.Sprintf("%s/tcp", containerPort)))
+	host, port, err := getContainerHostPort(ctx, container, nat.Port(containerPort+"/tcp"))
 	if err != nil {
 		return err
+	}
+
+	client := &http.Client{
+		Timeout: 5 * time.Second,
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		fmt.Sprintf("http://%s", net.JoinHostPort(host, port)), nil)
+		"http://"+net.JoinHostPort(host, port), nil)
 	if err != nil {
 		return err
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -279,7 +290,7 @@ func doHTTPRequest(ctx context.Context, container testcontainers.Container, cont
 		return fmt.Errorf("received not OK status: %d", resp.StatusCode)
 	}
 
-	return err
+	return nil
 }
 
 // createTempFile creates a temporary file with the given lines which is deleted after the test
@@ -287,6 +298,8 @@ func doHTTPRequest(ctx context.Context, container testcontainers.Container, cont
 func createTempFile(lines ...string) string {
 	file, err := os.CreateTemp("", "blocky_e2e_file-")
 	Expect(err).Should(Succeed())
+
+	defer file.Close()
 
 	DeferCleanup(func() error {
 		return os.Remove(file.Name())

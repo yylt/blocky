@@ -1,4 +1,4 @@
-//go:generate go run github.com/abice/go-enum -f=$GOFILE --marshal --names --values
+//go:generate go tool go-enum -f=$GOFILE --marshal --names --values
 package config
 
 import (
@@ -38,7 +38,7 @@ type Configurable interface {
 	// LogConfig logs the receiver's configuration.
 	//
 	// The behavior of this method is undefined when `IsEnabled` returns false.
-	LogConfig(*logrus.Entry)
+	LogConfig(logger *logrus.Entry)
 }
 
 // NetProtocol resolver protocol ENUM(
@@ -171,14 +171,37 @@ func (l *ListenConfig) UnmarshalText(data []byte) error {
 
 	*l = strings.Split(addresses, ",")
 
-	// Prefix all ports with :
+	l.prefixPorts()
+
+	return nil
+}
+
+// UnmarshalYAML creates a ListenConfig from YAML
+func (l *ListenConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	// Try parsing as a native YAML array...
+	if unmarshal((*[]string)(l)) == nil {
+		l.prefixPorts()
+
+		return nil
+	}
+
+	// ...if it fails, it should be a comma separated string
+	var str string
+
+	if err := unmarshal(&str); err != nil {
+		return err
+	}
+
+	return l.UnmarshalText([]byte(str))
+}
+
+// prefixPorts ensures all ports have a : prefix
+func (l *ListenConfig) prefixPorts() {
 	for i, addr := range *l {
 		if !strings.ContainsRune(addr, ':') {
 			(*l)[i] = ":" + addr
 		}
 	}
-
-	return nil
 }
 
 // UnmarshalYAML creates BootstrapDNS from YAML
@@ -234,7 +257,7 @@ type Config struct {
 	Redis            Redis               `yaml:"redis"`
 	Log              log.Config          `yaml:"log"`
 	Ports            Ports               `yaml:"ports"`
-	MinTLSServeVer   TLSVersion          `yaml:"minTlsServeVersion" default:"1.2"`
+	MinTLSServeVer   TLSVersion          `default:"1.2"            yaml:"minTlsServeVersion"`
 	CertFile         string              `yaml:"certFile"`
 	KeyFile          string              `yaml:"keyFile"`
 	BootstrapDNS     BootstrapDNS        `yaml:"bootstrapDns"`
@@ -264,10 +287,11 @@ type Config struct {
 }
 
 type Ports struct {
-	DNS   ListenConfig `yaml:"dns" default:"53"`
-	HTTP  ListenConfig `yaml:"http"`
-	HTTPS ListenConfig `yaml:"https"`
-	TLS   ListenConfig `yaml:"tls"`
+	DNS     ListenConfig `default:"53"         yaml:"dns"`
+	HTTP    ListenConfig `yaml:"http"`
+	HTTPS   ListenConfig `yaml:"https"`
+	TLS     ListenConfig `yaml:"tls"`
+	DOHPath string       `default:"/dns-query" yaml:"dohPath"`
 }
 
 func (c *Ports) LogConfig(logger *logrus.Entry) {
@@ -308,7 +332,7 @@ type (
 )
 
 type toEnable struct {
-	Enable bool `yaml:"enable" default:"false"`
+	Enable bool `default:"false" yaml:"enable"`
 }
 
 // IsEnabled implements `config.Configurable`.
@@ -322,7 +346,7 @@ func (c *toEnable) LogConfig(logger *logrus.Entry) {
 }
 
 type Init struct {
-	Strategy InitStrategy `yaml:"strategy" default:"blocking"`
+	Strategy InitStrategy `default:"blocking" yaml:"strategy"`
 }
 
 func (c *Init) LogConfig(logger *logrus.Entry) {
@@ -332,9 +356,9 @@ func (c *Init) LogConfig(logger *logrus.Entry) {
 type SourceLoading struct {
 	Init `yaml:",inline"`
 
-	Concurrency        uint       `yaml:"concurrency" default:"4"`
-	MaxErrorsPerSource int        `yaml:"maxErrorsPerSource" default:"5"`
-	RefreshPeriod      Duration   `yaml:"refreshPeriod" default:"4h"`
+	Concurrency        uint       `default:"4"      yaml:"concurrency"`
+	MaxErrorsPerSource int        `default:"5"      yaml:"maxErrorsPerSource"`
+	RefreshPeriod      Duration   `default:"4h"     yaml:"refreshPeriod"`
 	Downloads          Downloader `yaml:"downloads"`
 }
 
@@ -405,12 +429,12 @@ func recoverToError(do func(context.Context) error, onPanic func(any) error) fun
 }
 
 type Downloader struct {
-	Timeout           Duration `yaml:"timeout" default:"5s"`
-	ReadTimeout       Duration `yaml:"readTimeout" default:"20s"`
-	ReadHeaderTimeout Duration `yaml:"readHeaderTimeout" default:"20s"`
-	WriteTimeout      Duration `yaml:"writeTimeout" default:"20s"`
-	Attempts          uint     `yaml:"attempts" default:"3"`
-	Cooldown          Duration `yaml:"cooldown" default:"500ms"`
+	Timeout           Duration `default:"5s"    yaml:"timeout"`
+	ReadTimeout       Duration `default:"20s"   yaml:"readTimeout"`
+	ReadHeaderTimeout Duration `default:"20s"   yaml:"readHeaderTimeout"`
+	WriteTimeout      Duration `default:"20s"   yaml:"writeTimeout"`
+	Attempts          uint     `default:"3"     yaml:"attempts"`
+	Cooldown          Duration `default:"500ms" yaml:"cooldown"`
 }
 
 func (c *Downloader) LogConfig(logger *logrus.Entry) {

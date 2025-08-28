@@ -44,6 +44,7 @@ var (
 )
 
 var _ = BeforeSuite(func() {
+	mockClientName.Store("")
 	baseURL = fmt.Sprintf("http://%s/", GetHostPort("localhost", httpBasePort))
 	queryURL = baseURL + "dns-query"
 	var upstreamGoogle, upstreamFritzbox, upstreamClient config.Upstream
@@ -75,8 +76,10 @@ var _ = BeforeSuite(func() {
 	clientMockUpstream = resolver.NewMockUDPUpstreamServer().WithAnswerFn(func(request *dns.Msg) (response *dns.Msg) {
 		var clientName string
 
-		if name, ok := mockClientName.Load().(string); ok {
+		if name, ok := mockClientName.Load().(string); ok && name != "" {
 			clientName = name
+		} else {
+			clientName = "localhost"
 		}
 
 		response, err := util.NewMsgWithAnswer(
@@ -147,10 +150,11 @@ var _ = BeforeSuite(func() {
 		},
 
 		Ports: config.Ports{
-			DNS:   config.ListenConfig{GetHostPort("", dnsBasePort)},
-			TLS:   config.ListenConfig{GetHostPort("", tlsBasePort)},
-			HTTP:  config.ListenConfig{GetHostPort("", httpBasePort)},
-			HTTPS: config.ListenConfig{GetHostPort("", httpsBasePort)},
+			DNS:     config.ListenConfig{GetHostPort("", dnsBasePort)},
+			TLS:     config.ListenConfig{GetHostPort("", tlsBasePort)},
+			HTTP:    config.ListenConfig{GetHostPort("", httpBasePort)},
+			HTTPS:   config.ListenConfig{GetHostPort("", httpsBasePort)},
+			DOHPath: "/dns-query",
 		},
 		CertFile: certPem.Path,
 		KeyFile:  keyPem.Path,
@@ -403,6 +407,7 @@ var _ = Describe("Running DNS server", func() {
 
 					Expect(resp).Should(HaveHTTPStatus(http.StatusOK))
 					Expect(resp).Should(HaveHTTPHeaderWithValue("Content-type", "application/dns-message"))
+					Expect(resp).Should(HaveHTTPHeaderWithValue("cache-control", "max-age=123"))
 
 					rawMsg, err := io.ReadAll(resp.Body)
 					Expect(err).Should(Succeed())
@@ -634,7 +639,8 @@ var _ = Describe("Running DNS server", func() {
 					},
 					Blocking: config.Blocking{BlockType: "zeroIp"},
 					Ports: config.Ports{
-						DNS: config.ListenConfig{GetHostPort("127.0.0.1", dnsBasePort2)},
+						DNS:     config.ListenConfig{GetHostPort("127.0.0.1", dnsBasePort2)},
+						DOHPath: "/dns-query",
 					},
 				})
 
@@ -678,7 +684,8 @@ var _ = Describe("Running DNS server", func() {
 					},
 					Blocking: config.Blocking{BlockType: "zeroIp"},
 					Ports: config.Ports{
-						DNS: config.ListenConfig{GetHostPort("127.0.0.1", dnsBasePort2)},
+						DNS:     config.ListenConfig{GetHostPort("127.0.0.1", dnsBasePort2)},
+						DOHPath: "/dns-query",
 					},
 				})
 
@@ -774,7 +781,6 @@ func requestServer(request *dns.Msg) *dns.Msg {
 		response := new(dns.Msg)
 
 		err = response.Unpack(out)
-
 		if err != nil {
 			Log().Fatal("can't unpack response: ", err)
 		}

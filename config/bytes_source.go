@@ -1,4 +1,4 @@
-//go:generate go run github.com/abice/go-enum -f=$GOFILE --marshal --names --values
+//go:generate go tool go-enum -f=$GOFILE --marshal --names --values
 package config
 
 import (
@@ -31,7 +31,7 @@ func (s BytesSource) String() string {
 		return s.From
 
 	case BytesSourceTypeFile:
-		return fmt.Sprintf("file://%s", s.From)
+		return "file://" + s.From
 
 	default:
 		return fmt.Sprintf("unknown source (%s: %s)", s.Type, s.From)
@@ -51,7 +51,7 @@ func (s BytesSource) String() string {
 	}
 
 	if truncated {
-		return fmt.Sprintf("%s...", text[:maxTextSourceDisplayLen])
+		return text[:maxTextSourceDisplayLen] + "..."
 	}
 
 	return text

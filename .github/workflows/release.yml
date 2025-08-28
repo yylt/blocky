@@ -14,7 +14,7 @@ jobs:
     if: github.repository_owner == '0xERR0R'
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -85,11 +85,7 @@ jobs:
             VERSION=${{ steps.get_vars.outputs.version }}
             BUILD_TIME=${{ steps.get_vars.outputs.build_time }}
             DOC_PATH=${{ steps.get_vars.outputs.doc_path }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
-      - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v2
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v5

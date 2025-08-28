@@ -159,7 +159,7 @@ func NewServer(ctx context.Context, cfg *config.Config) (server *Server, err err
 	}
 
 	httpRouter := createHTTPRouter(cfg, openAPIImpl)
-	server.registerDoHEndpoints(httpRouter)
+	server.registerDoHEndpoints(httpRouter, cfg)
 
 	if len(cfg.Ports.HTTP) != 0 {
 		srv := newHTTPServer("http", httpRouter, cfg)
@@ -299,6 +299,7 @@ func createQueryResolver(
 	queryLogging, qlErr := resolver.NewQueryLoggingResolver(ctx, cfg.QueryLog)
 	condUpstream, cuErr := resolver.NewConditionalUpstreamResolver(ctx, cfg.Conditional, cfg.Upstreams, bootstrap)
 	hostsFile, hfErr := resolver.NewHostsFileResolver(ctx, cfg.HostsFile, bootstrap)
+	cachingResolver, crErr := resolver.NewCachingResolver(ctx, cfg.Caching, redisClient)
 
 	err := multierror.Append(
 		multierror.Prefix(utErr, "upstream tree resolver: "),
@@ -307,6 +308,7 @@ func createQueryResolver(
 		multierror.Prefix(cnErr, "client names resolver: "),
 		multierror.Prefix(cuErr, "conditional upstream resolver: "),
 		multierror.Prefix(hfErr, "hosts file resolver: "),
+		multierror.Prefix(crErr, "caching resolver: "),
 	).ErrorOrNil()
 	if err != nil {
 		return nil, err
@@ -323,7 +325,7 @@ func createQueryResolver(
 		resolver.NewRewriterResolver(cfg.CustomDNS.RewriterConfig, resolver.NewCustomDNSResolver(cfg.CustomDNS)),
 		hostsFile,
 		blocking,
-		resolver.NewCachingResolver(ctx, cfg.Caching, redisClient),
+		cachingResolver,
 		resolver.NewRewriterResolver(cfg.Conditional.RewriterConfig, condUpstream),
 		resolver.NewSpecialUseDomainNamesResolver(cfg.SUDN),
 		upstreamTree,
@@ -390,8 +392,6 @@ func (s *Server) Start(ctx context.Context, errCh chan<- error) {
 	logger().Info("Starting server")
 
 	for _, srv := range s.dnsServers {
-		srv := srv
-
 		go func() {
 			if err := srv.ListenAndServe(); err != nil {
 				errCh <- fmt.Errorf("start %s listener failed: %w", srv.Net, err)
@@ -400,8 +400,6 @@ func (s *Server) Start(ctx context.Context, errCh chan<- error) {
 	}
 
 	for listener, srv := range s.servers {
-		listener, srv := listener, srv
-
 		go func() {
 			logger().Infof("%s server is up and running on addr/port %s", srv, listener.Addr())
 
@@ -558,7 +556,7 @@ func (s *Server) resolve(ctx context.Context, request *model.Request) (response 
 		}
 	}
 
-	response.Res.MsgHdr.RecursionAvailable = request.Req.MsgHdr.RecursionDesired
+	response.Res.RecursionAvailable = request.Req.RecursionDesired
 
 	// truncate if necessary
 	response.Res.Truncate(getMaxResponseSize(request))

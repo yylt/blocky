@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -48,7 +49,7 @@ type hostsIterator interface {
 }
 
 func (h *HostsIterator) ForEach(callback func(string) error) error {
-	return h.hostsIterator.forEachHost(callback)
+	return h.forEachHost(callback)
 }
 
 func (h *HostsIterator) UnmarshalText(data []byte) error {
@@ -172,7 +173,7 @@ func (e *HostsFileEntry) UnmarshalText(data []byte) error {
 	}
 
 	if len(hosts) == 0 {
-		return fmt.Errorf("expected at least one host following IP")
+		return errors.New("expected at least one host following IP")
 	}
 
 	*e = HostsFileEntry{
@@ -246,6 +247,10 @@ func normalizeHostsListEntry(host string) (string, error) {
 			return "", fmt.Errorf("%w: %s", err, host)
 		}
 	}
+
+	// remove optional start and end markers for ABP styled lists
+	host = strings.TrimPrefix(host, "||")
+	host = strings.TrimSuffix(host, "^")
 
 	if err := validateHostsListEntry(host); err != nil {
 		return "", err
